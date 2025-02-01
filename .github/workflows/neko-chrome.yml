@@ -1,0 +1,45 @@
+name: Neko Docker with Chrome (Manual Trigger)
+
+on:
+  workflow_dispatch: # Allows manual triggering
+    inputs:
+      ADMIN_PASSWORD:
+        description: 'Password for the admin user'
+        required: true
+        type: string
+      PASSWORD:
+        description: 'Password for the user'
+        required: false
+        type: string
+
+jobs:
+  run-neko-docker:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Run Docker Container from Script
+      run: |
+        echo "Run Neko"
+        export NEKO_PASSWORD_ADMIN=$(jq -r '.inputs.ADMIN_PASSWORD' $GITHUB_EVENT_PATH)
+        export NEKO_PASSWORD=$(jq -r '.inputs.PASSWORD' $GITHUB_EVENT_PATH)
+        # Now run the script silently (no output)
+        bash ${GITHUB_WORKSPACE}/run_docker.sh > /dev/null 2>&1
+
+    - name: Verify container is running
+      run: docker ps > /dev/null 2>&1
+
+    - name: Expose container with Bore
+      run: |
+        docker run -d --init --rm --name bore-tunnel --network host ekzhang/bore local 8080 --to bore.pub > /dev/null 2>&1
+        sleep 10  # Wait for Bore Tunnel to start
+
+    - name: Get Bore Tunnel Logs & Extract URL
+      run: |
+        BORE_LOGS=$(docker logs bore-tunnel 2>&1 | grep -oE 'bore.pub:[0-9]+')
+        echo "Bore Tunnel URL: http://$BORE_LOGS"
+
+    - name: Sleep for 6 hours
+      run: sleep 21600 # 6 hours in seconds
