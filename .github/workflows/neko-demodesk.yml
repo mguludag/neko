@@ -1,0 +1,77 @@
+name: Run Neko (Demodesk Fork)
+
+on:
+  workflow_dispatch:
+    inputs:
+      PASSWORD:
+        description: "Admin password"
+        required: true
+        type: string
+
+jobs:
+  run-neko:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Neko Fork
+        run: |
+          git clone https://github.com/demodesk/neko.git
+          cd neko
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libopus-dev libx264-dev libsdl2-dev libvpx-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
+            xserver-xorg-video-dummy xserver-xorg-core x11-xserver-utils xvfb
+
+      # Build Neko Server using the root-level build script
+      - name: Build Neko Server
+        run: |
+          cd neko
+          chmod +x ./build
+          ./build
+
+      - name: Mask Password
+        run: echo "::add-mask::${{ github.event.inputs.PASSWORD }}"
+
+      # Run the compiled Neko server binary
+      - name: Run Neko Server
+        run: |
+          ./bin/neko \
+            -display 1920x1080@60 \
+            -password-admin "${{ github.event.inputs.PASSWORD }}" &
+
+      - name: Verify Neko Server is Running
+        run: pgrep -f neko || { echo "Neko server failed to start"; exit 1; }
+
+      # Install & Run Neko Client
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+
+      - name: Install Neko Client
+        run: npm install -g @demodesk/neko
+
+      - name: Run Neko Client
+        run: npx neko -p 3000 & # Serve client on port 3000
+
+      # Expose Both Client & Server
+      - name: Expose Neko Server via Bore
+        run: |
+          docker run -d --init --rm --name bore-server --network host ekzhang/bore local 8080 --to bore.pub
+          sleep 10  # Wait for Bore Tunnel to start
+
+      - name: Expose Neko Client via Bore
+        run: |
+          docker run -d --init --rm --name bore-client --network host ekzhang/bore local 3000 --to bore.pub
+          sleep 10  # Wait for Bore Tunnel to start
+
+      - name: Get Public URLs
+        run: |
+          SERVER_URL=$(docker logs bore-server 2>&1 | grep -oE 'bore.pub:[0-9]+')
+          CLIENT_URL=$(docker logs bore-client 2>&1 | grep -oE 'bore.pub:[0-9]+')
+          echo "Neko Server URL: http://$SERVER_URL"
+          echo "Neko Client URL: http://$CLIENT_URL"
+
+      - name: Keep Running for 6 Hours
+        run: sleep 21600
